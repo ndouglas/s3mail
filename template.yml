@@ -2,7 +2,25 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: "s3mail - Serverless Email Server"
 
+Parameters:
+
+  BucketName:
+    Type: String
+    Default: "s3mail.bucket"
+
+  EmailDomain:
+    Type: String
+    Default: "devmail.example.com"
+
 Resources:
+
+  LambdaNodeBaseLayer:
+    Type: "AWS::Serverless::LayerVersion"
+    Properties:
+      LayerName: !Sub "s3mail_LambdaNodeBaseLayer"
+      ContentUri: ./layer/
+      CompatibleRuntimes:
+        - nodejs14.x
 
   S3IamGroup:
     Type: "AWS::IAM::Group"
@@ -18,29 +36,8 @@ Resources:
               - Effect: Allow
                 Action: "s3:*"
                 Resource:
-                  - !GetAtt EmailBucket.Arn
-
-  EmailBucket:
-    Type: "AWS::S3::Bucket"
-    Properties:
-      BucketName: "s3mail.bucket"
-      LifecycleConfiguration:
-        Rules:
-          - Id: "Intelligent Transition for Today"
-            ExpirationInDays: 1
-            NoncurrentVersionExpirationInDays: 1
-            Prefix: "Today/"
-            Status: "Enabled"
-          - Id: "Intelligent Transition for Inbox"
-            ExpirationInDays: 7
-            NoncurrentVersionExpirationInDays: 7
-            Prefix: "Inbox/"
-            Status: "Enabled"
-          - Id: "Intelligent Transition for Sent"
-            ExpirationInDays: 7
-            NoncurrentVersionExpirationInDays: 1
-            Prefix: "Sent/"
-            Status: "Enabled"
+                  - !Sub "arn:aws:s3:::${BucketName}"
+                  - !Sub "arn:aws:s3:::${BucketName}/*"
 
   LambdaRole:
     Type: "AWS::IAM::Role"
@@ -64,8 +61,8 @@ Resources:
                 Effect: Allow
                 Action: "s3:*"
                 Resource:
-                  - !GetAtt EmailBucket.Arn
-                  - !Sub "${EmailBucket.Arn}/*"
+                  - !Sub "arn:aws:s3:::${BucketName}"
+                  - !Sub "arn:aws:s3:::${BucketName}/*"
               - Sid: AllowS3Listing
                 Effect: Allow
                 Action: "s3:ListAllMyBuckets"
@@ -78,3 +75,157 @@ Resources:
                 Effect: Allow
                 Action: "ses:listIdentities"
                 Resource: "*"
+
+  ConverterFunction:
+    Type: "AWS::Serverless::Function"
+    Properties:
+      CodeUri: ./lambda/converter/
+      Handler: app.handler
+      Runtime: nodejs14.x
+      Role: !GetAtt LambdaRole.Arn
+      Layers:
+        - !Ref LambdaNodeBaseLayer
+      MemorySize: 256
+      Timeout: 60
+
+  ConverterFunctionInvokePermission:
+    Type: "AWS::Lambda::Permission"
+    DependsOn: ConverterFunction
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref ConverterFunction
+      Principal: "s3.amazonaws.com"
+
+  InboundFunction:
+    Type: "AWS::Serverless::Function"
+    Properties:
+      CodeUri: ./lambda/inbound/
+      Handler: app.handler
+      Runtime: nodejs14.x
+      Role: !GetAtt LambdaRole.Arn
+      Layers:
+        - !Ref LambdaNodeBaseLayer
+      MemorySize: 256
+      Timeout: 60
+
+  InboundFunctionInvokePermission:
+    Type: "AWS::Lambda::Permission"
+    DependsOn: InboundFunction
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref InboundFunction
+      Principal: "s3.amazonaws.com"
+
+  OutboundFunction:
+    Type: "AWS::Serverless::Function"
+    Properties:
+      CodeUri: ./lambda/outbound/
+      Handler: app.handler
+      Runtime: nodejs14.x
+      Role: !GetAtt LambdaRole.Arn
+      Layers:
+        - !Ref LambdaNodeBaseLayer
+      MemorySize: 256
+      Timeout: 60
+
+  OutboundFunctionInvokePermission:
+    Type: "AWS::Lambda::Permission"
+    DependsOn: OutboundFunction
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref OutboundFunction
+      Principal: "s3.amazonaws.com"
+
+  EmailBucket:
+    Type: "AWS::S3::Bucket"
+    DependsOn:
+      - ConverterFunction
+      - InboundFunction
+      - OutboundFunction
+    Properties:
+      BucketName: !Ref BucketName
+      LifecycleConfiguration:
+        Rules:
+          - Id: "Intelligent Transition for Today"
+            ExpirationInDays: 1
+            NoncurrentVersionExpirationInDays: 1
+            Prefix: "Today/"
+            Status: "Enabled"
+          - Id: "Intelligent Transition for Inbox"
+            ExpirationInDays: 7
+            NoncurrentVersionExpirationInDays: 7
+            Prefix: "Inbox/"
+            Status: "Enabled"
+          - Id: "Intelligent Transition for Sent"
+            ExpirationInDays: 7
+            NoncurrentVersionExpirationInDays: 1
+            Prefix: "Sent/"
+            Status: "Enabled"
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Function: !GetAtt InboundFunction.Arn
+            Event: "s3:ObjectCreated:Put"
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: "prefix"
+                    Value: "TMP/email_in"
+          - Function: !GetAtt OutboundFunction.Arn
+            Event: "s3:ObjectCreated:Put"
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: "prefix"
+                    Value: "TMP/email_out/json"
+          - Function: !GetAtt ConverterFunction.Arn
+            Event: "s3:ObjectCreated:Copy"
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: "prefix"
+                    Value: "Sent/"
+          - Function: !GetAtt ConverterFunction.Arn
+            Event: "s3:ObjectCreated:Copy"
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: "prefix"
+                    Value: "Inbox/"
+          - Function: !GetAtt ConverterFunction.Arn
+            Event: "s3:ObjectCreated:Copy"
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: "prefix"
+                    Value: "Today/"
+
+  ReceiptRule:
+    Type: "AWS::SES::ReceiptRule"
+    Properties:
+      RuleSetName: "Rules"
+      Rule:
+        Name: "s3mail_EmailInbound"
+        Enabled: true
+        Recipients:
+          - !Ref EmailDomain
+        Actions:
+          - S3Action:
+              BucketName: !Ref EmailBucket
+              ObjectKeyPrefix: "TMP/email_in"
+
+  EmailBucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref EmailBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowSESPuts
+            Effect: Allow
+            Principal:
+              Service: "ses.amazonaws.com"
+            Action: "s3:PutObject"
+            Resource: !Sub "arn:aws:s3:::${EmailBucket}/TMP/email_in/*"
+            Condition:
+              StringEquals:
+                aws:Referer: !Sub "${AWS::AccountId}"
