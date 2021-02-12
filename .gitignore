@@ -1,3 +1,6 @@
+.aws-sam
+output_template.yaml
+
 # Logs
 logs
 *.log
