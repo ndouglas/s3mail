@@ -20,6 +20,9 @@
   },
   "homepage": "https://github.com/ndouglas/s3mail#readme",
   "dependencies": {
+    "@s3mail/shared": "file:local_modules/shared",
+    "@s3mail/test": "file:local_modules/test",
+    "chai": "^4.3.0",
     "mocha": "^8.3.0"
   }
 }
