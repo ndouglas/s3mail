@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: "s3mail - Serverless Email Server"
+
+Resources:
+
+  S3IamGroup:
+    Type: "AWS::IAM::Group"
+    Properties:
+      Policies:
+        - PolicyName: "s3mail_S3Policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "s3:ListAllMyBuckets"
+                Resource: "*"
+              - Effect: Allow
+                Action: "s3:*"
+                Resource:
+                  - !GetAtt EmailBucket.Arn
+
+  EmailBucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: "s3mail.bucket"
+      LifecycleConfiguration:
+        Rules:
+          - Id: "Intelligent Transition for Today"
+            ExpirationInDays: 1
+            NoncurrentVersionExpirationInDays: 1
+            Prefix: "Today/"
+            Status: "Enabled"
+          - Id: "Intelligent Transition for Inbox"
+            ExpirationInDays: 7
+            NoncurrentVersionExpirationInDays: 7
+            Prefix: "Inbox/"
+            Status: "Enabled"
+          - Id: "Intelligent Transition for Sent"
+            ExpirationInDays: 7
+            NoncurrentVersionExpirationInDays: 1
+            Prefix: "Sent/"
+            Status: "Enabled"
+
+  LambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      Policies:
+        - PolicyName: "s3mail_LambdaS3Policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AllowS3Stuff
+                Effect: Allow
+                Action: "s3:*"
+                Resource:
+                  - !GetAtt EmailBucket.Arn
+                  - !Sub "${EmailBucket.Arn}/*"
+              - Sid: AllowS3Listing
+                Effect: Allow
+                Action: "s3:ListAllMyBuckets"
+                Resource: "*"
+              - Sid: AllowCloudwatchLogging
+                Effect: Allow
+                Action: "logs:*"
+                Resource: "arn:aws:logs:*:*:*"
+              - Sid: ListSesIdentities
+                Effect: Allow
+                Action: "ses:listIdentities"
+                Resource: "*"
