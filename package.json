@@ -1,0 +1,25 @@
+{
+  "name": "s3mail",
+  "version": "1.0.0",
+  "description": "A simple AWS system for processing emails, useful for development, etc.",
+  "main": "index.js",
+  "scripts": {
+    "test": "./node_modules/.bin/mocha --recursive tests/",
+    "test-unit": "./node_modules/.bin/mocha --recursive tests/unit",
+    "test-func": "./node_modules/.bin/mocha --recursive tests/functional"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ndouglas/s3mail.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ndouglas/s3mail/issues"
+  },
+  "homepage": "https://github.com/ndouglas/s3mail#readme",
+  "dependencies": {
+    "mocha": "^8.3.0"
+  }
+}
