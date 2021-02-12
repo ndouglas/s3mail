@@ -1,5 +1,5 @@
 .aws-sam
-output_template.yaml
+output_template.yml
 
 # Logs
 logs
